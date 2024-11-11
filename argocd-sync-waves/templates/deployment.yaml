@@ -1,7 +1,42 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: secret-provisioning-job
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  template:
+    spec:
+      serviceAccount: admin-sa
+      containers:
+        - name: secret-provisioning-job
+          image: ghcr.io/colinjlacy/secret-provisioning-job:0.3
+          env:
+            - name: MYSQL_ADMIN_PW
+              valueFrom:
+                secretKeyRef:
+                  name: mysqldb
+                  key: mysql-root-password
+            - name: MYSQL_ADMIN_USER
+              value: root
+            - name: MYSQL_DOMAIN
+              value: {{ .Values.dbUrl}}
+            - name: APP_VERSION
+              value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
+            - name: MYSQL_USERNAME
+              value: {{ include "argocd-sync-waves.fullname" . }}
+            - name: SECRET_LABEL
+              value: {{ .Values.secretLabel }}
+      restartPolicy: Never
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "argocd-sync-waves.fullname" . }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "0"
   labels:
     {{- include "argocd-sync-waves.labels" . | nindent 4 }}
 spec:
@@ -29,22 +64,24 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: {{ .Chart.Name }}
+          command: ["node", "index.js"]
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+          - name: MYSQL_PW
+            valueFrom:
+              secretKeyRef:
+                name: "{{ include "argocd-sync-waves.fullname" . }}-secret-{{ .Values.image.tag }}"
+                key: password
+          - name: MYSQL_USER
+            value: {{ include "argocd-sync-waves.fullname" . }}
+          - name: MYSQL_HOST
+            value: {{ .Values.dbUrl}}
           ports:
-            - name: http
-              containerPort: 80
-              protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /
-              port: http
-          readinessProbe:
-            httpGet:
-              path: /
-              port: http
+          - name: http
+            containerPort: {{ .Values.service.port }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}
@@ -59,3 +96,76 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "argocd-sync-waves.fullname" . }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "0"
+  labels:
+    {{- include "argocd-sync-waves.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - targetPort: {{ .Values.service.port }}
+      port: 80
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "argocd-sync-waves.selectorLabels" . | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-phase-job
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  template:
+    spec:
+      containers:
+        - name: test-phase-job
+          image: ghcr.io/colinjlacy/test-phase-job:0.3
+          env:
+          - name: MYSQL_PW
+            valueFrom:
+              secretKeyRef:
+                name: "{{ include "argocd-sync-waves.fullname" . }}-secret-{{ .Values.image.tag }}"
+                key: password
+          - name: MYSQL_USER
+            value: {{ include "argocd-sync-waves.fullname" . }}
+          - name: MYSQL_HOST
+            value: {{ .Values.dbUrl }}
+          - name: APP_VERSION
+            value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
+          - name: SERVICE_DOMAIN
+            value: "{{ include "argocd-sync-waves.fullname" . }}.default.svc.cluster.local"
+      restartPolicy: Never
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: secrets-cleanup-job
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  template:
+    spec:
+      serviceAccount: admin-sa
+      containers:
+        - name: secrets-cleanup-job
+          image: ghcr.io/colinjlacy/secret-cleanup-job:0.3
+          env:
+          - name: MYSQL_USERNAME
+            value: {{ include "argocd-sync-waves.fullname" . }}
+          - name: APP_VERSION
+            value: "{{ .Values.image.tag | default .Chart.AppVersion }}"
+          - name: SECRET_LABEL
+            value: {{ .Values.secretLabel }}
+      restartPolicy: Never
