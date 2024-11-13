@@ -4,14 +4,14 @@ metadata:
   name: secret-provisioning-job
   annotations:
     argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
 spec:
   template:
     spec:
       serviceAccount: admin-sa
       containers:
         - name: secret-provisioning-job
-          image: ghcr.io/colinjlacy/secret-provisioning-job:0.4
+          image: ghcr.io/colinjlacy/secret-provisioning-job:0.6
           env:
             - name: MYSQL_ADMIN_PW
               valueFrom:
@@ -121,15 +121,15 @@ kind: Job
 metadata:
   name: test-phase-job
   annotations:
-    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   template:
     spec:
       containers:
-        - name: test-phase-job
-          image: ghcr.io/colinjlacy/test-phase-job:0.3
+        - name: api-test-job
+          image: ghcr.io/colinjlacy/api-test-job:0.3
           env:
           - name: MYSQL_PW
             valueFrom:
@@ -152,8 +152,8 @@ metadata:
   name: secrets-cleanup-job
   annotations:
     argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   template:
     spec:
