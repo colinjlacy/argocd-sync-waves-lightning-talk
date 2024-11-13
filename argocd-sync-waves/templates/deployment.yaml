@@ -11,7 +11,7 @@ spec:
       serviceAccount: admin-sa
       containers:
         - name: secret-provisioning-job
-          image: ghcr.io/colinjlacy/secret-provisioning-job:0.3
+          image: ghcr.io/colinjlacy/secret-provisioning-job:0.4
           env:
             - name: MYSQL_ADMIN_PW
               valueFrom:
